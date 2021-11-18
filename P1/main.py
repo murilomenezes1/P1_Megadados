@@ -1,90 +1,72 @@
-from typing import Optional, List
+from typing import List
 
-from fastapi import FastAPI, Query, Form
+from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy.orm import Session
 
-from pydantic import BaseModel
-
-from fastapi.encoders import jsonable_encoder
-
+from . import crud, models, schemas
+from .database import SessionLocal, engine
 
 
-class Discipline(BaseModel):
-	name: str
-	professor: Optional[str] = None
-	notes: List[Optional[str]] = None
+models.Base.metadata.create_all(bind=engine)
 
 
 app = FastAPI()
 
-classes = {}
-discipline_list = set()
-notes_list = []
-disc_notes_list = []
+
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-@app.post("/AddDiscipline/",
-	response_model=Discipline)
-async def create_item(item: Discipline):
+@app.post("/discipline/", response_model=schemas.Discipline)
+def create_discipline(discipline: schemas.DisciplineCreate, db: Session = Depends(get_db)):
+    db_discipline = crud.get_discipline(db, name=discipline.discipline)
+    if db_discipline:
+        raise HTTPException(status_code=400, detail="discipline already registered")
+    return crud.create_discipline(db=db, data=discipline)
 
-	discipline_dict = item.dict()
-	if discipline_dict['name'] not in discipline_list and (discipline_dict['professor'] != ("string" or "")) and (discipline_dict['notes'] != ("string" or "")) :
-		classes[discipline_dict['name']] = {'professor': discipline_dict['professor'], 'notes':discipline_dict['notes']}
-	else: 
-		classes[discipline_dict['name']] = {'professor': None , 'notes': []}
+@app.post("/discipline/notes", response_model=schemas.Note)
+def create_note(discipline: str, note: str, db: Session = Depends(get_db)):
 
-	return discipline_dict
-
-@app.get("/ReadDisciplines/")
-async def read_items():
-
-	for i in classes.keys():
-		discipline_list.add(i)
-
-	return discipline_list
-
-@app.delete("/DeleteDiscipline")
-async def delete_item(discipline_name: str):
-
-	del classes[name]
-
-	return classes
-
-@app.put("/UpdateDiscipline")
-async def update_item(name: str, new_name: str = Query(None), professor: str = Query(None), notes: str = Query(None)):
-
-	if professor:
-		classes[name]['professor'] = professor
-	if notes:
-		classes[name]['notes'] = notes
-		notes_list.append(notes)
-	if new_name: 
-		classes[new_name] = classes[name]
-		del classes[name]
-		discipline_list.remove(name)
+    return crud.add_note(db,discipline,note)
 
 
+@app.get("/discipline/", response_model=List[schemas.Discipline])
+def get_disciplines(db: Session = Depends(get_db)):
 
-	return classes
+    return crud.get_all_disciplines(db)
 
-@app.delete("/DeleteNotes")
-async def delete_notes(name: str, index: int):
+@app.get("/notes/", response_model=List[schemas.Note])
+def get_notes(discipline: str, db: Session = Depends(get_db)):
 
-	del classes[name]['notes'][index]
+    return crud.get_discipline_notes(db, discipline)
 
-	return classes
 
-@app.get("/ReadNotes")
-async def read_notes(name: str):
+@app.delete("/discipline/")
+def delete_discipline(discipline: str,db: Session = Depends(get_db)):
 
-	
-	disc_notes_list.append(classes[name]['notes'])
+    db_discipline = crud.get_discipline(db, name=discipline)
+    if not db_discipline:
+        raise HTTPException(status_code=400, detail="Discipline not registered")
+    return crud.delete_discipline(db,name=discipline)
 
-	return disc_notes_list
+@app.delete('/discipline/note')
+def delete_note(note_id:int, db: Session = Depends(get_db)):
 
-@app.put("/AddNotes")
-async def add_notes(name: str, note: str):
+    return crud.delete_note(db,note_id)
 
-	notes_list.append(note)
-	classes[name]['notes'].append(note)
 
-	return classes
+@app.put('/discipline/', response_model=schemas.Discipline)
+async def update_discipline(data: schemas.DisciplineUpdate, discipline: str, db: Session = Depends(get_db)):
+    
+    return crud.update_discipline(db,name = discipline,data = data)
+
+@app.patch('/note/', response_model=schemas.Note)
+def update_note(data: schemas.NoteUpdate, note_id: int, db: Session = Depends(get_db)):
+
+    return crud.update_note(db, id=note_id, data=data)
+
